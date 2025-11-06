@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>Object-Location Memory (スマホWeb版)</title>
+  <style>
+    :root { --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#9ca3af; --accent:#22c55e; --warn:#ef4444; }
+    * { box-sizing: border-box; touch-action: none; }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Noto Sans", sans-serif; }
+    .wrap { max-width: 480px; margin: 0 auto; padding: 16px; }
+    .card { background: linear-gradient(180deg, #0b1225 0%, #0a0f1e 100%); border: 1px solid #1f2937; border-radius: 16px; padding: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    p { margin: 8px 0; color: var(--muted); }
+    .row { display: flex; gap: 8px; align-items: center; }
+    .btn { -webkit-tap-highlight-color: transparent; appearance: none; border: 0; border-radius: 12px; padding: 12px 14px; background: #1f2937; color: var(--text); font-weight: 600; }
+    .btn.primary { background: var(--accent); color: #041107; }
+    .btn.ghost { background: transparent; border: 1px solid #334155; }
+    .btn.full { width: 100%; }
+    .bar { height: 8px; width: 100%; background: #0b1225; border-radius: 999px; overflow: hidden; border: 1px solid #1f2937; }
+    .bar > div { height: 100%; width: 0%; background: linear-gradient(90deg, #22c55e, #10b981, #06b6d4); transition: width .2s ease; }
+
+    .stage { position: relative; width: 100%; aspect-ratio: 1 / 1; background: #0a0f1e; border: 1px solid #1f2937; border-radius: 16px; overflow: hidden; }
+    .grid { position: absolute; inset: 0; background: radial-gradient(#0e162c 1px, transparent 1px) 0 0/24px 24px, #0a0f1e; opacity: .6; }
+
+    .obj { position: absolute; width: 44px; height: 44px; border-radius: 12px; background: #60a5fa; border: 2px solid #1d4ed8; display: flex; align-items: center; justify-content: center; font-weight: 700; color: #04111b; box-shadow: 0 6px 16px rgba(2,132,199,.3); }
+    .ghosting { opacity: 0.95; }
+
+    .tray { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .chip { padding: 8px 10px; border-radius: 999px; border: 1px dashed #334155; color: #9ca3af; font-size: 12px; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .ok { color: var(--accent); }
+    .bad { color: var(--warn); }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .footer { opacity: .7; font-size: 12px; text-align: center; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card" id="screen-consent" hidden>
+      <h1>研究参加の説明と同意</h1>
+      <p>この課題は <b>物体位置記憶</b> を測定します。スマホ1台で約5〜8分。操作はドラッグ＆ドロップのみです。ログ（匿名ID, 反応時間, 誤差など）が送信されます。個人情報・位置情報は取得しません。</p>
+      <p class="muted">体調が悪い場合は中止してください。途中で離脱しても問題ありません。</p>
+      <div class="row" style="margin-top:12px">
+        <button class="btn ghost full" id="btn-consent-no">同意しない</button>
+        <button class="btn primary full" id="btn-consent-yes">同意して開始</button>
+      </div>
+    </div>
+
+    <div class="card" id="screen-setup" hidden>
+      <h1>参加者IDと設定</h1>
+      <p>任意のID（例: abc123）。空欄なら自動生成します。</p>
+      <div class="row"><input id="pid" class="btn full" placeholder="participant_id" /></div>
+      <p class="muted">デバイス: <span id="ua"></span><br/> 画面: <span id="vw"></span> × <span id="vh"></span> px</p>
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary full" id="btn-setup-go">準備OK</button>
+      </div>
+    </div>
+
+    <div class="card" id="screen-instruction" hidden>
+      <h1>課題の流れ</h1>
+      <ol class="muted">
+        <li>画面に <b><span id="ins-n"></span> 個</b> のブロックが現れます（<b>記憶</b>）</li>
+        <li>位置が消えます</li>
+        <li>トレイからブロックをドラッグして <b>元の位置</b>へ配置（<b>想起</b>）</li>
+      </ol>
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary full" id="btn-start">はじめる</button>
+      </div>
+    </div>
+
+    <div class="card" id="screen-task" hidden>
+      <div class="row" style="justify-content:space-between; align-items:center; margin-bottom:8px;">
+        <div class="muted">参加者: <span id="label-pid" class="mono"></span>｜Trial <span id="label-trial"></span>/<span id="label-total"></span></div>
+        <div class="muted">段階: <span id="label-phase">学習</span></div>
+      </div>
+      <div class="bar"><div id="bar"></div></div>
+      <div class="stage" id="stage">
+        <div class="grid"></div>
+      </div>
+      <div class="tray" id="tray"></div>
+      <div class="row" style="margin-top:10px; gap:10px;">
+        <button class="btn full" id="btn-reset" title="配置をやり直す">やり直す</button>
+        <button class="btn primary full" id="btn-confirm" title="この回答を送る">回答を確定</button>
+      </div>
+      <p class="muted" id="hint"></p>
+    </div>
+
+    <div class="card" id="screen-finish" hidden>
+      <h1>完了しました</h1>
+      <p>ご参加ありがとうございました。ログは送信されました。</p>
+      <div class="footer">匿名ID: <span class="mono" id="done-pid"></span></div>
+    </div>
+
+    <div class="footer">OLM Web Template • v1.2（残像なし・端はみ出し防止）</div>
+  </div>
+
+  <script>
+  // ===== 実験設定 =====
+  const CONFIG = {
+    STUDY_SECONDS: 8,
+    SET_SIZES: [3,5,7],                 // 物体数（難易度）
+    TRIALS_PER_SET: 2,                  // 各難易度の繰り返し
+    COLOR_CONDITIONS: ['single','multi'], // 色の要因（単色/多色）
+    ALLOW_RADIUS_PX: 32,
+    ENDPOINT_URL: "https://script.google.com/macros/s/AKfycbzF_xH41EK4-Vo03K54POSzKR3VCWj9q92Jr6PW6078Onb4_8nYZN1kflEiFFwiE9fZRA/exec",
+    SEND_LOGS: true,
+    // 代表的な4色（赤・青・緑・黄）
+    COLORS: [
+      {name:'red',   hex:'#e63946', border:'#b91c1c'},
+      {name:'blue',  hex:'#457b9d', border:'#1d4ed8'},
+      {name:'green', hex:'#2a9d8f', border:'#065f46'},
+      {name:'yellow',hex:'#e9c46a', border:'#b45309'}
+    ],
+    SINGLE_COLOR: {name:'blue', hex:'#1f77b4', border:'#1d4ed8'} // 単色条件で使う色
+  };
+
+  // ===== 状態 =====
+  const S = {
+    pid: null,
+    trialIndex: 0,
+    trials: [],   // { n, colorCondition, targets:[{id,x,y,color:{name,hex,border}}] }
+    phase: "study",
+    studyStart: 0,
+    recallStart: 0,
+    adjustments: 0
+  };
+
+  const $ = (q) => document.querySelector(q);
+  const stage = $('#stage');
+  const tray = $('#tray');
+  const bar = $('#bar');
+  const labelPid = $('#label-pid');
+  const labelTrial = $('#label-trial');
+  const labelTotal = $('#label-total');
+  const labelPhase = $('#label-phase');
+  const hint = $('#hint');
+
+  function show(id){
+    for (const el of document.querySelectorAll('.card')) el.hidden = true;
+    $(id).hidden = false;
+  }
+
+  (function init(){
+    $('#ua').textContent = navigator.userAgent;
+    $('#vw').textContent = window.innerWidth;
+    $('#vh').textContent = window.innerHeight;
+
+    show('#screen-consent');
+
+    $('#btn-consent-yes').onclick = ()=>{ show('#screen-setup'); };
+    $('#btn-consent-no').onclick = ()=>{
+      alert('同意が得られなかったため終了します。');
+      location.href = 'about:blank';
+    };
+
+    $('#btn-setup-go').onclick = ()=>{
+      const v = ($('#pid').value||'').trim();
+      S.pid = v || ('p' + Math.random().toString(36).slice(2, 9));
+      labelPid.textContent = S.pid;
+      $('#ins-n').textContent = CONFIG.SET_SIZES.join(' / ');
+      buildTrials();
+      show('#screen-instruction');
+    };
+
+    $('#btn-start').onclick = startExperiment;
+    $('#btn-reset').onclick = resetRecall;
+    $('#btn-confirm').onclick = confirmAnswer;
+  })();
+
+  // ===== トライアル作成（色要因入り：単色/多色 × 物体数 × 繰り返し）=====
+  function buildTrials(){
+    const t = [];
+    for (const cond of CONFIG.COLOR_CONDITIONS){
+      for (const n of CONFIG.SET_SIZES){
+        for (let r=0;r<CONFIG.TRIALS_PER_SET;r++){
+          t.push(makeTrial(n, cond));
+        }
+      }
+    }
+    // シャッフル
+    for (let i=t.length-1;i>0;i--){
+      const j = (Math.random()*(i+1))|0; [t[i], t[j]] = [t[j], t[i]];
+    }
+    S.trials = t;
+  }
+
+  function makeTrial(n, colorCondition){
+    // 端の余白：端末サイズに応じて動的に確保（最小44px、推奨約8%）
+    const W = stage.clientWidth || 360;
+    const H = stage.clientHeight || W;
+    const pad = Math.max(44, Math.floor(Math.min(W, H) * 0.08));
+    const targets = [];
+    let attempts=0;
+    while (targets.length < n && attempts < 5000){
+      attempts++;
+      const x = pad + Math.random()*(W - pad*2);
+      const y = pad + Math.random()*(H - pad*2);
+      const ok = targets.every(o => Math.hypot(o.x-x, o.y-y) > 56);
+      if (ok){
+        targets.push({ id: 'O'+targets.length, x, y });
+      }
+    }
+
+    // 色割当
+    if (colorCondition === 'single'){
+      for (const o of targets){
+        o.color = {...CONFIG.SINGLE_COLOR};
+      }
+    } else { // multi
+      for (let i=0;i<targets.length;i++){
+        const c = CONFIG.COLORS[i % CONFIG.COLORS.length];
+        targets[i].color = {...c};
+      }
+      // 色の割当順を軽くシャッフル
+      for (let i=targets.length-1;i>0;i--){
+        const j = (Math.random()*(i+1))|0; [targets[i].color, targets[j].color] = [targets[j].color, targets[i].color];
+      }
+    }
+
+    return { n, colorCondition, targets, pad };
+  }
+
+  function startExperiment(){
+    S.trialIndex = 0; nextTrial();
+    show('#screen-task');
+  }
+
+  function nextTrial(){
+    if (S.trialIndex >= S.trials.length){
+      show('#screen-finish');
+      $('#done-pid').textContent = S.pid;
+      return;
+    }
+    const t = S.trials[S.trialIndex];
+    labelTrial.textContent = (S.trialIndex+1);
+    labelTotal.textContent = S.trials.length;
+    S.phase = 'study';
+    labelPhase.textContent = '学習';
+    hint.innerHTML = `位置を覚えてください（色条件：<span class="ok">${t.colorCondition==='single'?'単色':'多色'}</span>）。<span class="ok">${CONFIG.STUDY_SECONDS}秒</span>後に消えます。`;
+    tray.innerHTML = '';
+    S.adjustments = 0;
+
+    renderStage(t.targets, /*showDuringStudy=*/true);
+    bar.style.width = '0%';
+
+    const start = performance.now();
+    S.studyStart = start;
+
+    const timer = setInterval(()=>{
+      const dt = (performance.now() - start)/1000;
+      const ratio = Math.min(1, dt / CONFIG.STUDY_SECONDS);
+      bar.style.width = (ratio*100).toFixed(1)+'%';
+      if (dt >= CONFIG.STUDY_SECONDS){
+        clearInterval(timer);
+        toRecall();
+      }
+    }, 50);
+  }
+
+  // 学習中のみターゲットを描く。想起では一切描かない（＝残像なし）
+  function renderStage(targets, showDuringStudy){
+    stage.querySelectorAll('.obj').forEach(n=>n.remove());
+    if (!showDuringStudy) return; // 想起では非表示
+    for (const o of targets){
+      const div = document.createElement('div');
+      div.className = 'obj';
+      div.textContent = o.id.replace('O','');
+      div.style.left = (o.x - 22) + 'px';
+      div.style.top  = (o.y - 22) + 'px';
+      div.dataset.id = o.id;
+      div.style.background = o.color.hex;
+      div.style.borderColor = o.color.border;
+      stage.appendChild(div);
+    }
+  }
+
+  function toRecall(){
+    S.phase = 'recall';
+    labelPhase.textContent = '想起';
+    hint.textContent = 'トレイから同じ番号のブロックをドラッグし、元の位置へ置いてください。';
+    bar.style.width = '0%';
+    renderStage(S.trials[S.trialIndex].targets, /*showDuringStudy=*/false); // ← 残像なし
+
+    tray.innerHTML = '';
+    for (const o of S.trials[S.trialIndex].targets){
+      const chip = document.createElement('div');
+      chip.className = 'chip';
+      chip.textContent = 'ブロック ' + o.id.replace('O','');
+      chip.dataset.id = o.id;
+      tray.appendChild(chip);
+
+      const drag = document.createElement('div');
+      drag.className = 'obj ghosting';
+      drag.textContent = o.id.replace('O','');
+      drag.dataset.id = o.id;
+      drag.style.left = (8 + Math.random()*40) + 'px';
+      drag.style.top  = (stage.clientHeight - 52 - Math.random()*40) + 'px';
+      drag.style.background = o.color.hex;
+      drag.style.borderColor = o.color.border;
+      attachDrag(drag);
+      stage.appendChild(drag);
+    }
+
+    S.recallStart = performance.now();
+  }
+
+  function attachDrag(el){
+    let ox=0, oy=0, dragging=false;
+
+    const start = (e)=>{
+      dragging = true; S.adjustments++;
+      const t = (e.touches? e.touches[0] : e);
+      const r = el.getBoundingClientRect();
+      ox = t.clientX - r.left; oy = t.clientY - r.top;
+    };
+
+    const move = (e)=>{
+      if (!dragging) return;
+      const t = (e.touches? e.touches[0] : e);
+      const st = stage.getBoundingClientRect();
+      let x = t.clientX - st.left - ox + 22;
+      let y = t.clientY - st.top  - oy + 22;
+      // ステージ内にクリップ
+      x = Math.max(22, Math.min(stage.clientWidth - 22, x));
+      y = Math.max(22, Math.min(stage.clientHeight - 22, y));
+      el.style.left = (x - 22) + 'px';
+      el.style.top  = (y - 22) + 'px';
+    };
+
+    const end = ()=>{ dragging = false; };
+
+    el.addEventListener('touchstart', start, {passive:false});
+    el.addEventListener('touchmove', move, {passive:false});
+    el.addEventListener('touchend', end, {passive:false});
+    el.addEventListener('mousedown', start);
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', end);
+  }
+
+  function resetRecall(){
+    if (S.phase !== 'recall') return;
+    S.adjustments = 0;
+    toRecall();
+  }
+
+  function confirmAnswer(){
+    if (S.phase !== 'recall') return;
+    const t = S.trials[S.trialIndex];
+
+    const placed = {};
+    stage.querySelectorAll('.obj.ghosting').forEach(el =>{
+      const id = el.dataset.id;
+      const x = parseFloat(el.style.left) + 22;
+      const y = parseFloat(el.style.top) + 22;
+      placed[id] = {x,y};
+    });
+
+    const rt_ms = Math.round(performance.now() - S.recallStart);
+
+    const rows = [];
+    const W = stage.clientWidth, H = stage.clientHeight;
+    for (const o of t.targets){
+      const r = placed[o.id];
+      const dx = (r?.x ?? 0) - o.x;
+      const dy = (r?.y ?? 0) - o.y;
+      const dist = Math.hypot(dx, dy);
+      const correct = dist <= CONFIG.ALLOW_RADIUS_PX;
+      rows.push({
+        pid: S.pid,
+        trial_index: S.trialIndex+1,
+        n: t.n,
+        trial_color_condition: t.colorCondition, // 単色or多色
+        obj_id: o.id,
+        obj_color: o.color.name,                // red/blue/green/yellow or blue(single)
+        target_x_px: Math.round(o.x),
+        target_y_px: Math.round(o.y),
+        resp_x_px: Math.round(r?.x ?? -1),
+        resp_y_px: Math.round(r?.y ?? -1),
+        target_x_norm: +(o.x/W).toFixed(6),
+        target_y_norm: +(o.y/H).toFixed(6),
+        resp_x_norm: +((r?.x??-1)/W).toFixed(6),
+        resp_y_norm: +((r?.y??-1)/H).toFixed(6),
+        err_px: +dist.toFixed(2),
+        correct_radius_px: CONFIG.ALLOW_RADIUS_PX,
+        correct: +correct,
+        rt_ms: rt_ms,
+        adjust_count: S.adjustments,
+        ua: navigator.userAgent,
+        vw: window.innerWidth,
+        vh: window.innerHeight,
+        ts: new Date().toISOString()
+      });
+    }
+
+    if (CONFIG.SEND_LOGS && CONFIG.ENDPOINT_URL.includes('script.google.com')){
+      fetch(CONFIG.ENDPOINT_URL, {
+        method:'POST',
+        mode:'no-cors',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ kind:'olm', version:'1.2-no-ghost', rows })
+      }).catch(()=>{});
+    }
+
+    S.trialIndex++;
+    nextTrial();
+  }
+  </script>
+</body>
+</html>
